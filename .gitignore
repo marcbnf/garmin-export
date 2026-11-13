@@ -1,0 +1,55 @@
+# === Garmin data & credentials (NEVER commit) ===
+# Credentials read by `main.py --no-gui` (GARMIN_EMAIL / GARMIN_PASSWORD)
+.env
+.env.*
+*.env
+!.env.example
+# Login tokens (normally in ~/.garminconnect, unless --tokenstore points here)
+.garminconnect/
+garmin_tokens.json
+# Exported health data and its cache, whatever the --output folder
+export/
+garmin_export_*.txt
+.cache/
+# Test fixtures made from your own account (tools/anonymize_cache.py)
+tests/fixtures/private*/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+
+# === Virtual environments ===
+venv/
+.venv/
+env/
+ENV/
+
+# === Build (build.py / PyInstaller) ===
+build/
+dist/
+*.spec
+
+# === Test & tool caches ===
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS files ===
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# === Logs & temp ===
+*.log
+*.tmp
+*.bak

@@ -1,0 +1,6 @@
+# Build, lint and icon tools (not needed to run the app)
+-r requirements.txt
+pyinstaller>=6.10,<7
+ruff>=0.15
+mypy>=1.15
+pillow>=11  # tools/make_icon.py only

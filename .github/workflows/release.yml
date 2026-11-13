@@ -1,0 +1,183 @@
+name: Build & Release
+
+# Every push to main builds the app for all systems. When the VERSION file
+# holds a version that has no GitHub release yet, the builds are published
+# as release v<VERSION> (the tag is created automatically). So, to publish:
+# edit VERSION, commit, push. Nothing else.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    name: Read VERSION
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release v$VERSION already exists: build only. Change VERSION to publish a new one."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release v$VERSION yet: it will be published."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows-x86_64
+          - os: macos-latest
+            label: macos-arm64
+          - os: macos-15-intel
+            label: macos-x86_64
+          # Older Ubuntu = older glibc = runs on more Linux distributions
+          - os: ubuntu-22.04
+            label: linux-x86_64
+    env:
+      # Optional macOS Developer ID signing + notarization (see README).
+      # When these secrets are absent, the app is signed ad hoc only.
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # python.org / setup-python builds include Tkinter on all three OSes
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # Exact versions from requirements-lock.txt: reproducible release builds
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt -c requirements-lock.txt
+
+      # Style only: never blocks a release
+      - name: Lint and type check
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          ruff check .
+          mypy
+
+      - name: Tests
+        run: |
+          python main.py --no-gui --help
+          python -m unittest discover -s tests -v
+
+      # Optional packages: without them the zip / tar.gz are still built
+      - name: Install Inno Setup (Windows installer)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Install appimagetool (Linux AppImage)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+          echo "APPIMAGETOOL=$RUNNER_TEMP/appimagetool" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate (macOS, optional)
+        if: runner.os == 'macOS' && env.MACOS_SIGN_IDENTITY != ''
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ needs.version.outputs.release }}" == "true" ]]; then
+            VERSION="v${{ needs.version.outputs.version }}"
+          else
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+          python build.py "${{ matrix.label }}" "$VERSION"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: garmin-export-${{ matrix.label }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: [version, build]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG: v${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: actions/checkout@v7
+        with:
+          path: src
+          sparse-checkout: packaging/homebrew
+
+      # Homebrew cask with this release's checksums (copy it to your tap repository)
+      - name: Generate Homebrew cask
+        continue-on-error: true
+        run: |
+          VERSION="${TAG#v}"
+          ARM=$(sha256sum "artifacts/garmin-export-$TAG-macos-arm64.zip" | cut -d' ' -f1)
+          INTEL=$(sha256sum "artifacts/garmin-export-$TAG-macos-x86_64.zip" | cut -d' ' -f1)
+          sed -e "s/^  version \".*\"/  version \"$VERSION\"/" \
+              -e "s/REPLACE_WITH_SHA256_OF_macos-arm64.zip/$ARM/" \
+              -e "s/REPLACE_WITH_SHA256_OF_macos-x86_64.zip/$INTEL/" \
+              src/packaging/homebrew/garmin-export.rb > artifacts/garmin-export.rb
+          cat artifacts/garmin-export.rb
+
+      # Creates the tag on the built commit, then the release
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Garmin Export ${{ env.TAG }}
+          files: artifacts/*
+          generate_release_notes: true

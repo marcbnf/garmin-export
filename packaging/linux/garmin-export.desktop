@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Garmin Export
+Comment=Export your Garmin Connect data to LLM-ready plain text
+Exec=GarminExport
+Icon=garmin-export
+Terminal=false
+Categories=Utility;

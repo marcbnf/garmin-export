@@ -1,0 +1,33 @@
+# Exact versions used for release builds (pip install -c requirements-lock.txt).
+# Constraints only: packages not needed on a platform are simply ignored.
+# Updated by Dependabot; bump by hand with care for garminconnect.
+
+# runtime
+garminconnect==0.3.20
+curl_cffi==0.17.0
+requests==2.34.2
+ua-generator==2.1.8
+certifi==2026.10.23
+cffi==2.1.1
+pycparser==3.12
+charset-normalizer==3.5.2
+idna==3.20
+urllib3==2.8.0
+keyring==25.7.0
+jaraco.classes==3.4.0
+jaraco.context==6.1.2
+jaraco.functools==4.6.0
+more-itertools==11.2.1
+pywin32-ctypes==0.2.3  # keyring, Windows
+SecretStorage==3.5.0   # keyring, Linux
+jeepney==0.9.0         # keyring, Linux
+cryptography==50.0.2   # SecretStorage
+
+# build
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.10
+altgraph==0.17.5
+macholib==1.16.4
+pefile==2024.8.26
+packaging==26.3
+setuptools==84.2.1

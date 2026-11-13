@@ -1,0 +1,5 @@
+# Runtime dependencies. Upper bounds: garminconnect talks to Garmin's unofficial
+# API and its minor releases can change behavior -- upgrade deliberately
+# (Dependabot opens a pull request, CI runs the tests).
+garminconnect>=0.3.20,<0.4
+keyring>=25,<26
